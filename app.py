@@ -1,57 +1,35 @@
 import os
-import sqlite3
+import json
 import smtplib
 import requests
-import schedule
-import time
 from email.message import EmailMessage
-from dotenv import load_dotenv
-
-load_dotenv()
 
 TOKEN = os.getenv("TRAVELPAYOUTS_TOKEN")
 EMAIL_USER = os.getenv("EMAIL_USER")
 EMAIL_APP_PASSWORD = os.getenv("EMAIL_APP_PASSWORD")
 ALERT_TO_EMAIL = os.getenv("ALERT_TO_EMAIL")
 
-DB_NAME = "flight_prices.db"
+STATE_FILE = "price_state.json"
+
+FLIGHTS = [
+    {
+        "origin": "DFW",
+        "destination": "JFK",
+        "departure_date": "2026-08"
+    }
+]
 
 
-def setup_db():
-    conn = sqlite3.connect(DB_NAME)
-    cursor = conn.cursor()
-
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS tracker (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            origin TEXT,
-            destination TEXT,
-            departure_date TEXT,
-            lowest_price REAL
-        )
-    """)
-
-    conn.commit()
-    conn.close()
+def load_state():
+    if not os.path.exists(STATE_FILE):
+        return {}
+    with open(STATE_FILE, "r") as file:
+        return json.load(file)
 
 
-def add_flight(origin, destination, departure_date):
-    conn = sqlite3.connect(DB_NAME)
-    cursor = conn.cursor()
-
-    cursor.execute("""
-        SELECT id FROM tracker
-        WHERE origin=? AND destination=? AND departure_date=?
-    """, (origin, destination, departure_date))
-
-    if cursor.fetchone() is None:
-        cursor.execute("""
-            INSERT INTO tracker (origin, destination, departure_date, lowest_price)
-            VALUES (?, ?, ?, ?)
-        """, (origin, destination, departure_date, None))
-
-    conn.commit()
-    conn.close()
+def save_state(state):
+    with open(STATE_FILE, "w") as file:
+        json.dump(state, file, indent=2)
 
 
 def get_price(origin, destination, departure_date):
@@ -63,6 +41,7 @@ def get_price(origin, destination, departure_date):
         "departure_at": departure_date,
         "one_way": "true",
         "currency": "usd",
+        "market": "us",
         "sorting": "price",
         "limit": 1,
         "token": TOKEN
@@ -70,7 +49,6 @@ def get_price(origin, destination, departure_date):
 
     response = requests.get(url, params=params)
     response.raise_for_status()
-
     data = response.json()
 
     if not data.get("data"):
@@ -106,55 +84,39 @@ Book soon because prices can change quickly.
 
 def check_prices():
     print("Checking flight prices...")
+    state = load_state()
 
-    conn = sqlite3.connect(DB_NAME)
-    cursor = conn.cursor()
+    for flight in FLIGHTS:
+        origin = flight["origin"]
+        destination = flight["destination"]
+        departure_date = flight["departure_date"]
 
-    cursor.execute("SELECT id, origin, destination, departure_date, lowest_price FROM tracker")
-    flights = cursor.fetchall()
+        key = f"{origin}-{destination}-{departure_date}"
 
-    for flight in flights:
-        flight_id, origin, destination, departure_date, lowest_price = flight
+        current_price = get_price(origin, destination, departure_date)
 
-        try:
-            current_price = get_price(origin, destination, departure_date)
+        if current_price is None:
+            print(f"No price found for {origin} to {destination}")
+            continue
 
-            if current_price is None:
-                print(f"No price found for {origin} to {destination}")
-                continue
+        print(f"{origin} to {destination} on {departure_date}: ${current_price}")
 
-            print(f"{origin} to {destination}: ${current_price}")
+        old_price = state.get(key)
 
-            if lowest_price is None:
-                cursor.execute(
-                    "UPDATE tracker SET lowest_price=? WHERE id=?",
-                    (current_price, flight_id)
-                )
-                print("Initial price saved.")
+        if old_price is None:
+            state[key] = current_price
+            print("Initial price saved.")
 
-            elif current_price < lowest_price:
-                send_email(origin, destination, departure_date, lowest_price, current_price)
+        elif current_price < old_price:
+            send_email(origin, destination, departure_date, old_price, current_price)
+            state[key] = current_price
+            print("Price dropped. Email sent.")
 
-                cursor.execute(
-                    "UPDATE tracker SET lowest_price=? WHERE id=?",
-                    (current_price, flight_id)
-                )
+        else:
+            print("No price drop.")
 
-                print("Price dropped. Email sent.")
-
-            else:
-                print("No price drop.")
-
-        except Exception as e:
-            print("Error:", e)
-
-    conn.commit()
-    conn.close()
+    save_state(state)
 
 
-setup_db()
-
-# Change this based on your flight
-add_flight("DFW", "JFK", "2026-08")
-
-check_prices()
+if __name__ == "__main__":
+    check_prices()
