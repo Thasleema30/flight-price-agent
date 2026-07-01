@@ -47,7 +47,7 @@ def get_price(origin, destination, departure_date):
         "token": TOKEN
     }
 
-    response = requests.get(url, params=params)
+    response = requests.get(url, params=params, timeout=30)
     response.raise_for_status()
     data = response.json()
 
@@ -58,6 +58,8 @@ def get_price(origin, destination, departure_date):
 
 
 def send_email(origin, destination, departure_date, old_price, new_price):
+    print("Preparing email...", flush=True)
+
     msg = EmailMessage()
     msg["Subject"] = "Flight Price Drop Alert"
     msg["From"] = EMAIL_USER
@@ -77,13 +79,20 @@ New price: ${new_price}
 Book soon because prices can change quickly.
 """)
 
-    with smtplib.SMTP_SSL("smtp.gmail.com", 465) as smtp:
+    print("Connecting to Gmail SMTP...", flush=True)
+
+    with smtplib.SMTP_SSL("smtp.gmail.com", 465, timeout=30) as smtp:
+        print("Logging into Gmail...", flush=True)
         smtp.login(EMAIL_USER, EMAIL_APP_PASSWORD)
+
+        print("Sending email...", flush=True)
         smtp.send_message(msg)
+
+    print("Email sent successfully.", flush=True)
 
 
 def check_prices():
-    print("Checking flight prices...")
+    print("Checking flight prices...", flush=True)
     state = load_state()
 
     for flight in FLIGHTS:
