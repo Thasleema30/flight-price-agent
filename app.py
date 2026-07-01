@@ -23,6 +23,7 @@ FLIGHTS = [
 def load_state():
     if not os.path.exists(STATE_FILE):
         return {}
+
     with open(STATE_FILE, "r") as file:
         return json.load(file)
 
@@ -33,6 +34,8 @@ def save_state(state):
 
 
 def get_price(origin, destination, departure_date):
+    print("Calling Travelpayouts API...", flush=True)
+
     url = "https://api.travelpayouts.com/aviasales/v3/prices_for_dates"
 
     params = {
@@ -49,6 +52,9 @@ def get_price(origin, destination, departure_date):
 
     response = requests.get(url, params=params, timeout=30)
     response.raise_for_status()
+
+    print("Travelpayouts API responded.", flush=True)
+
     data = response.json()
 
     if not data.get("data"):
@@ -93,6 +99,7 @@ Book soon because prices can change quickly.
 
 def check_prices():
     print("Checking flight prices...", flush=True)
+
     state = load_state()
 
     for flight in FLIGHTS:
@@ -102,30 +109,39 @@ def check_prices():
 
         key = f"{origin}-{destination}-{departure_date}"
 
-        current_price = get_price(origin, destination, departure_date)
+        try:
+            current_price = get_price(origin, destination, departure_date)
 
-        if current_price is None:
-            print(f"No price found for {origin} to {destination}")
-            continue
+            if current_price is None:
+                print(f"No price found for {origin} to {destination}", flush=True)
+                continue
 
-        print(f"{origin} to {destination} on {departure_date}: ${current_price}")
+            print(
+                f"{origin} to {destination} on {departure_date}: ${current_price}",
+                flush=True
+            )
 
-        old_price = state.get(key)
+            old_price = state.get(key)
 
-        if old_price is None:
-            state[key] = current_price
-            print("Initial price saved.")
+            if old_price is None:
+                state[key] = current_price
+                print("Initial price saved.", flush=True)
 
-        elif current_price < old_price:
-            send_email(origin, destination, departure_date, old_price, current_price)
-            state[key] = current_price
-            print("Price dropped. Email sent.")
+            elif current_price < old_price:
+                send_email(origin, destination, departure_date, old_price, current_price)
+                state[key] = current_price
+                print("Price dropped. Email sent.", flush=True)
 
-        else:
-            print("No price drop.")
+            else:
+                print("No price drop.", flush=True)
+
+        except Exception as e:
+            print(f"Error checking {origin} to {destination}: {e}", flush=True)
 
     save_state(state)
 
 
 if __name__ == "__main__":
+    print("Program started", flush=True)
     check_prices()
+    print("Program finished", flush=True)
