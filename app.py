@@ -140,7 +140,6 @@ def check_prices():
 
     save_state(state)
 
-
 if __name__ == "__main__":
     print("Program started", flush=True)
     check_prices()
